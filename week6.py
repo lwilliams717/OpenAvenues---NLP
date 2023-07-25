@@ -66,7 +66,30 @@ class MinimumFlow(FlowSpec):
         
         plt.bar(labels, values, width=0.6)
         plt.savefig('impressions_stop_words.png')
+        self.next(self.target_vals)
+    
+    @step
+    def target_vals(self):
+        # repeating the label value for the length of the documents in the column
+        f_y = [0] * len(self.find)
+        c_y = [1] * len(self.clin)
+        e_y = [2] * len(self.exam)
+        i_y = [3] * len(self.impr)
+
+        # combine all the labels
+        self.category_labels = f_y + c_y + e_y + i_y
         self.next(self.preproc)
+    
+    def clean_data(self, w):
+        import re
+        from nltk.corpus import stopwords
+        stopwords_list = stopwords.words('english')
+        clean_corpus = []
+        w = w.lower()
+        w=re.sub(r'[^\w\s]','',w)
+        words = w.split() 
+        clean_words = [word for word in words if (word not in stopwords_list) and len(word) > 2]
+        return clean_words
     
     @step    
     def preproc(self):
@@ -74,14 +97,132 @@ class MinimumFlow(FlowSpec):
         import nltk
         #nltk.download('stopwords')
         from nltk.corpus import stopwords
-        stopwords_list = stopwords.words('english')
-        clean_corpus = []
-        for w in self.corpus:
-            w = w.lower()
-            w = re.sub(r'[^\w\s]','',w)
-            words = w.split() 
-            clean_words = [word for word in words if (word not in stopwords_list) and len(word) > 2]
-            clean_corpus.append(clean_words)
+        self.clean_corpus = list(map(self.clean_data,self.corpus))
+        self.corpus = [' '.join(words) for words in self.clean_corpus]
+        self.next(self.tfidf)
+    
+    @step
+    def tfidf(self):
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        vectorizer = TfidfVectorizer()
+        self.tfidf_documents = vectorizer.fit_transform(self.corpus)
+        self.next(self.word2vec)
+    
+    @step
+    def word2vec(self):
+        import multiprocessing
+        import gensim
+        from gensim.models import Word2Vec
+        import numpy as np
+        self.corpus = self.clean_corpus
+        cores = multiprocessing.cpu_count()
+        self.w2v_model = Word2Vec(min_count=5,window=5,vector_size=300,workers=cores-1,max_vocab_size=100000)
+        self.w2v_model.build_vocab(self.corpus)
+        self.w2v_model.train(self.corpus,total_examples=self.w2v_model.corpus_count,epochs=50)
+        
+        f = len(self.find)
+        c = len(self.clin)
+        e = len(self.exam)
+        i = len(self.impr)
+
+        self.document_vectors = []
+        for doc in self.corpus:
+            vectors = [self.w2v_model.wv[word] for word in doc if word in self.w2v_model.wv]
+            if vectors:
+                doc_vector = np.mean(vectors, axis=0)
+            else:
+                doc_vector = np.zeros(300)
+            self.document_vectors.append(doc_vector)
+        self.document_vectors = np.array(self.document_vectors)
+        self.next(self.join)
+    
+    @step
+    def join(self):
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import accuracy_score
+        # word2vec logistic
+        X = np.array(self.document_vectors)
+        y = np.array(self.category_labels)
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=24)
+        log_reg = LogisticRegression()
+
+        log_reg.fit(X_train, y_train)
+        y_pred = log_reg.predict(X_test)
+        
+        # Calculate accuracy of the model
+        accuracy = accuracy_score(y_test, y_pred)
+        print("W2V Accuracy:", accuracy)
+        
+        X = self.tfidf_documents.toarray()
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=24)
+        log_reg.fit(X_train, y_train)
+        y_pred = log_reg.predict(X_test)
+
+        # Calculate accuracy of the model
+        accuracy = accuracy_score(y_test, y_pred)
+        print("TFIDF Accuracy:", accuracy)
+        self.next(self.word2vec_plot)    
+    
+    @step
+    def word2vec_plot(self):
+        import sklearn
+        from sklearn.manifold import TSNE
+        import matplotlib.pyplot as plt        
+        word_vectors = self.w2v_model.wv.vectors
+        tsne = TSNE(n_components=2, random_state=42)
+        vectors_2d = tsne.fit_transform(self.document_vectors)
+        
+        f = len(self.find)
+        c = len(self.clin)
+        e = len(self.exam)
+        i = len(self.impr)
+
+        color = ""
+        plt.figure(figsize=(10, 8))
+        for i, word in enumerate(vectors_2d):
+            if i <= f:
+                color = "red"
+            elif i <= f + c:
+                color = "green"
+            elif i <= f + c + e:
+                color = "blue"
+            else:
+                color = "yellow"
+            x, y = vectors_2d[i, :]
+            plt.scatter(x, y, c=color)
+        plt.savefig("word2vec.png")
+        self.next(self.tfidf_plot)
+        
+    @step
+    def tfidf_plot(self):
+        import sklearn
+        from sklearn.decomposition import PCA
+        import matplotlib.pyplot as plt
+        colors = ['red', 'green', 'blue','yellow']
+        labels = ['Findings', 'Clinical Data', 'Exam Name', 'Impressions']
+
+        pca = PCA(n_components=2)
+        tfidf_matrix_2d = pca.fit_transform(self.tfidf_documents.toarray())
+        # print(tfidf_matrix_2d.shape)
+        color = -1
+        label = -1
+        for i, document in enumerate(tfidf_matrix_2d):
+            if i % 954 == 0:
+                color+=1
+                label+=1
+            x_coords = document[0]
+            y_coords = document[1]
+            plt.scatter(x_coords, y_coords, color=colors[color], label=labels[label])
+
+        # Set plot title and axis labels.
+        plt.title("TF-IDF Matrix Scatter Plot")
+        plt.xlabel("Dimension 1")
+        plt.ylabel("Dimension 2")
+        # Display the scatter plot.
+        plt.savefig("tfidf.png")
         self.next(self.end)
     
     @step
