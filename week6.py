@@ -2,6 +2,17 @@ from metaflow import FlowSpec, step
 
 class MinimumFlow(FlowSpec):
     
+    def clean_data(self, w):
+        import re
+        from nltk.corpus import stopwords
+        stopwords_list = stopwords.words('english')
+        clean_corpus = []
+        w = w.lower()
+        w=re.sub(r'[^\w\s]','',w)
+        words = w.split() 
+        clean_words = [word for word in words if (word not in stopwords_list) and len(word) > 2]
+        return clean_words
+    
     @step
     def start(self):
         import pandas as pd
@@ -66,7 +77,7 @@ class MinimumFlow(FlowSpec):
         
         plt.bar(labels, values, width=0.6)
         plt.savefig('impressions_stop_words.png')
-        self.next(self.target_vals)
+        self.next(self.preproc)
     
     @step
     def target_vals(self):
@@ -78,18 +89,7 @@ class MinimumFlow(FlowSpec):
 
         # combine all the labels
         self.category_labels = f_y + c_y + e_y + i_y
-        self.next(self.preproc)
-    
-    def clean_data(self, w):
-        import re
-        from nltk.corpus import stopwords
-        stopwords_list = stopwords.words('english')
-        clean_corpus = []
-        w = w.lower()
-        w=re.sub(r'[^\w\s]','',w)
-        words = w.split() 
-        clean_words = [word for word in words if (word not in stopwords_list) and len(word) > 2]
-        return clean_words
+        self.next(self.join)
     
     @step    
     def preproc(self):
@@ -99,14 +99,14 @@ class MinimumFlow(FlowSpec):
         from nltk.corpus import stopwords
         self.clean_corpus = list(map(self.clean_data,self.corpus))
         self.corpus = [' '.join(words) for words in self.clean_corpus]
-        self.next(self.tfidf)
+        self.next(self.target_vals, self.tfidf, self.word2vec)
     
     @step
     def tfidf(self):
         from sklearn.feature_extraction.text import TfidfVectorizer
         vectorizer = TfidfVectorizer()
         self.tfidf_documents = vectorizer.fit_transform(self.corpus)
-        self.next(self.word2vec)
+        self.next(self.join)
     
     @step
     def word2vec(self):
@@ -137,14 +137,15 @@ class MinimumFlow(FlowSpec):
         self.next(self.join)
     
     @step
-    def join(self):
+    def join(self, inputs):
         import numpy as np
         from sklearn.linear_model import LogisticRegression
         from sklearn.model_selection import train_test_split
         from sklearn.metrics import accuracy_score
-        # word2vec logistic
-        X = np.array(self.document_vectors)
-        y = np.array(self.category_labels)
+        
+        # word2vec logistic  
+        X = np.array(inputs.word2vec.document_vectors)
+        y = np.array(inputs.target_vals.category_labels)
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=24)
         log_reg = LogisticRegression()
@@ -156,7 +157,8 @@ class MinimumFlow(FlowSpec):
         accuracy = accuracy_score(y_test, y_pred)
         print("W2V Accuracy:", accuracy)
         
-        X = self.tfidf_documents.toarray()
+        #tdidf logistic
+        X = inputs.tfidf.tfidf_documents.toarray()
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=24)
         log_reg.fit(X_train, y_train)
         y_pred = log_reg.predict(X_test)
@@ -164,6 +166,10 @@ class MinimumFlow(FlowSpec):
         # Calculate accuracy of the model
         accuracy = accuracy_score(y_test, y_pred)
         print("TFIDF Accuracy:", accuracy)
+        
+        self.w2v_model = inputs.word2vec.w2v_model
+        self.tfidf_documents = inputs.tfidf.tfidf_documents
+        self.document_vectors = inputs.word2vec.document_vectors
         self.next(self.word2vec_plot)    
     
     @step
@@ -174,25 +180,15 @@ class MinimumFlow(FlowSpec):
         word_vectors = self.w2v_model.wv.vectors
         tsne = TSNE(n_components=2, random_state=42)
         vectors_2d = tsne.fit_transform(self.document_vectors)
-        
-        f = len(self.find)
-        c = len(self.clin)
-        e = len(self.exam)
-        i = len(self.impr)
 
-        color = ""
+        color = -1
+        colors = ['red', 'green', 'blue','yellow']
         plt.figure(figsize=(10, 8))
         for i, word in enumerate(vectors_2d):
-            if i <= f:
-                color = "red"
-            elif i <= f + c:
-                color = "green"
-            elif i <= f + c + e:
-                color = "blue"
-            else:
-                color = "yellow"
+            if i % 954 == 0:
+                color+=1
             x, y = vectors_2d[i, :]
-            plt.scatter(x, y, c=color)
+            plt.scatter(x, y, c=colors[color])
         plt.savefig("word2vec.png")
         self.next(self.tfidf_plot)
         
