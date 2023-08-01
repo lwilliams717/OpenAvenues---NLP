@@ -2,18 +2,19 @@ import numpy as np
 
 # function to clean data for processing
 def clean_data(w):
-        import re
-        from nltk.corpus import stopwords
-        stopwords_list = stopwords.words('english')
-        clean_corpus = []
-        w = w.lower()
-        w=re.sub(r'[^\w\s]','',w)
-        words = w.split() 
-        clean_words = [word for word in words if (word not in stopwords_list) and len(word) > 2]
-        return clean_words
+    import re
+    from nltk.corpus import stopwords
+    stopwords_list = stopwords.words('english')
+    clean_corpus = []
+    w = w.lower()
+    w=re.sub(r'[^\w\s]','',w)
+    words = w.split() 
+    clean_words = [word for word in words if (word not in stopwords_list) and len(word) > 2]
+    return clean_words
 
 # function to calculate the mean length of each category
-def eda_len(find, clin, exam, impr):
+def eda_len(plt, labels, find, clin, exam, impr):
+    plt.clf()
     # impressions
     impr_lengths = np_length(impr)
     # findings
@@ -24,16 +25,19 @@ def eda_len(find, clin, exam, impr):
     exam_lengths = np_length(exam)
     
     char_len = [impr_lengths, find_lengths, clin_lengths, exam_lengths]
-    return char_len
+    x = range(len(char_len))
+    plt.bar(x, char_len)
+    plt.xticks(x,labels)
+    plt.savefig('text_length.png')
 
 # takes a body of text and finds the top 20 stop words
-def eda_stop(lis):
-    import nltk
-    nltk.download('punkt')
+def eda_stop(plt, lis):
+    # nltk.download('punkt')
     from nltk import FreqDist
     from nltk.corpus import stopwords
     from nltk.tokenize import word_tokenize
-        
+    
+    plt.clf()
     stop=set(stopwords.words('english'))
     words = list(map(lambda x : word_tokenize(x),lis))
     words = [word for i in words for word in i]
@@ -43,7 +47,70 @@ def eda_stop(lis):
     
     labels = [item[0] for item in top_20]
     values = [item[1] for item in top_20]
-    return labels, values
+    
+    plt.bar(labels, values, width=0.6)
+    plt.savefig('impressions_stop_words.png')
+
+def eda_words(plt, labels, findings, clinical, exam, impression):
+    import nltk
+    plt.clf()
+    impr_counts = [len(nltk.word_tokenize(sentence)) for sentence in impression]
+    impr_words = np.mean(impr_counts)
+    
+    find_counts = [len(nltk.word_tokenize(sentence)) for sentence in findings]
+    findings_words = np.mean(find_counts)
+    
+    clin_counts = [len(nltk.word_tokenize(sentence)) for sentence in clinical]
+    clin_words = np.mean(clin_counts)
+    
+    exam_counts = [len(nltk.word_tokenize(sentence)) for sentence in exam]
+    exam_words = np.mean(exam_counts)
+
+    words_bar = [impr_words, findings_words, clin_words, exam_words]
+    x = range(len(words_bar))
+    plt.bar(x, words_bar)
+    plt.xticks(x,labels)
+    plt.savefig('words_length.png')
+
+def bigrams(plt, corpus):
+    import pandas as pd
+    from nltk import RegexpTokenizer
+    from nltk.util import ngrams
+    from nltk import FreqDist
+    plt.clf()
+    tokenizer = RegexpTokenizer(r'\b\w+\b')
+    # Tokenize sentences into words
+    tokenized_sentences = [tokenizer.tokenize(sentence) for sentence in corpus]
+    # Create bigrams by words
+    bigrams = [list(ngrams(sentence, 2)) for sentence in tokenized_sentences]
+    bigrams = [bi for lis in bigrams for bi in lis]
+    bi_freq = FreqDist(bigrams)
+
+    # plotting the bigrams
+    bi_fdist = pd.Series(dict(bi_freq.most_common(20)))
+    bi_fdist.plot.bar()
+    plt.xlabel('Bigram')
+    plt.ylabel('Frequency')
+    plt.title('Top 20 Bigrams')
+    plt.tight_layout()  # Ensures labels are not cut off
+    plt.savefig('bigram_bar_chart.png')  # Save the plot as an image
+    plt.show()
+    
+def wordcloud(plt, corpus):
+    import wordcloud
+    from wordcloud import WordCloud
+    from nltk.corpus import stopwords
+    text = ' '.join(corpus)
+    wordcloud = WordCloud(
+        width=1800, 
+        height=1400,
+        max_words=100)
+    
+    wordcloud=wordcloud.generate(text)
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wordcloud, interpolation="bilinear")
+    plt.axis("off")
+    plt.savefig('word_cloud.png')
 
 # helper function to get the mean length of a list
 def np_length(lis):

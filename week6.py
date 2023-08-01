@@ -12,26 +12,26 @@ class NLPFlow(FlowSpec):
         self.exam = self.df["ExamName"].values.tolist()
         self.impr = self.df["impression"].values.tolist()
         self.corpus = self.find + self.clin + self.exam + self.impr
-        self.next(self.eda_len)
+        self.next(self.eda)
             
     @step
-    def eda_len(self):
+    def eda(self):
         import matplotlib.pyplot as plt
         import numpy as np
-        from functions import eda_len, eda_stop
+        from functions import eda_len, eda_stop, eda_words, bigrams, wordcloud
         
-        # character length
-        char_len = eda_len(self.find, self.clin, self.exam, self.impr)
         labels = ["impressions", "findings", "clinical data", "exam"]
-        x = range(len(char_len))
-        plt.bar(x, char_len)
-        plt.xticks(x,labels)
-        plt.savefig('text_length.png')
-        
+        # character length
+        eda_len(plt, labels, self.find, self.clin, self.exam, self.impr)
         # stop words for impressions 
-        labels, values = eda_stop(self.impr)
-        plt.bar(labels, values, width=0.6)
-        plt.savefig('impressions_stop_words.png')
+        eda_stop(plt, self.impr)
+        # length of words
+        eda_words(plt,labels, self.find, self.clin, self.exam, self.impr)
+        # list of bigrams
+        bigrams(plt, self.corpus)
+        # wordcloud
+        wordcloud(plt, self.corpus)
+        
         self.next(self.preproc)
     
     @step    
