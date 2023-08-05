@@ -80,7 +80,7 @@ class NLPFlow(FlowSpec):
         word2vec_plot(plt, vectors_2d, self.colors)
         self.document_vectors
         self.target_vals
-        self.next(self.join)
+        self.next(self.word2vec_train)
         
     @step
     def tfidf_plot(self):
@@ -90,20 +90,36 @@ class NLPFlow(FlowSpec):
         labels = ['Findings', 'Clinical Data', 'Exam Name', 'Impressions']
         tfidf_plot(self.tfidf_documents, plt, self.colors, labels)
         self.tfidf_documents
+        self.next(self.tfidf_train)
+    
+    # word2vec training step
+    @step
+    def word2vec_train(self):
+        import numpy as np
+        from functions import logistic_train
+        target_vals = self.target_vals
+        # calculate w2v accuracy
+        self.w2v_acc = logistic_train(self.document_vectors, target_vals)
         self.next(self.join)
     
+    # tfidf training step
+    @step
+    def tfidf_train(self):
+        import numpy as np
+        from functions import logistic_train
+        # calculate tfidf accuracy
+        tfidf_arr = self.tfidf_documents.toarray()
+        self.tfidf_acc = logistic_train(tfidf_arr, self.target_vals)
+        self.next(self.join)
+        
     # compare the models in join step
     @step
     def join(self, inputs):
         import numpy as np
         from functions import logistic_train
-        target_vals = inputs.word2vec_plot.target_vals
         # calculate w2v accuracy
-        print("W2V Accuracy:", logistic_train(inputs.word2vec_plot.document_vectors, target_vals))
-        
-        # calculate tfidf accuracy
-        tfidf_arr = inputs.tfidf_plot.tfidf_documents.toarray()
-        print("TFIDF Accuracy:", logistic_train(tfidf_arr, target_vals))
+        print("W2V Accuracy:", inputs.word2vec_train.w2v_acc)
+        print("TFIDF Accuracy:", inputs.tfidf_train.tfidf_acc)
         self.next(self.end)
     
     @step
